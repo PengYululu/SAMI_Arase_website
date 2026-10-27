@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SAMI3 + Arase 3D</title>
+<style>
+  :root { --bg: #ffffff; --fg: #1d2330; --muted: #5f6b7a; --line: #d9dee5; --panel: #f5f7fa; --accent: #2563eb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  header { padding: 10px 16px 0; }
+  h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  #subtitle { color: var(--muted); font-size: 13px; }
+  #main { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); height: 72vh; min-height: 420px; }
+  #plot3d, #plotleg { width: 100%; height: 100%; min-width: 0; }
+  #plotleg { border-left: 1px solid var(--line); }
+  @media (max-width: 900px) { #main { grid-template-columns: 1fr; height: auto; } #plot3d, #plotleg { height: 70vh; } #plotleg { border-left: 0; border-top: 1px solid var(--line); } }
+  #controls { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel); }
+  #controls button { font: inherit; padding: 4px 10px; border: 1px solid var(--line); background: #fff; border-radius: 6px; cursor: pointer; min-width: 36px; }
+  #controls button:hover { border-color: var(--accent); }
+  #play { min-width: 72px; }
+  #slider { flex: 1 1 320px; accent-color: var(--accent); }
+  #time { font-variant-numeric: tabular-nums; min-width: 300px; }
+  #time b { font-weight: 600; }
+  #info { padding: 6px 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #status { color: #b45309; }
+  #plot2d { width: 100%; height: 560px; }
+  .err { padding: 24px 16px; color: #b91c1c; }
+  label { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>SAMI3 electron density + Arase L3</h1>
+  <div id="subtitle">Drag to rotate, scroll to zoom, click legend items to hide them. The view stays where you leave it while the time changes.</div>
+</header>
+<div id="main">
+  <div id="plot3d"></div>
+  <div id="plotleg"></div>
+</div>
+<div id="controls">
+  <button id="prev" title="previous step (←)">◀</button>
+  <button id="play" title="play / pause (space)">▶ Play</button>
+  <button id="next" title="next step (→)">▶</button>
+  <input id="slider" type="range" min="0" max="0" value="0" step="1" aria-label="time step">
+  <label>speed <select id="fps">
+    <option value="1">1 fps</option><option value="2">2 fps</option><option value="4" selected>4 fps</option><option value="8">8 fps</option><option value="12">12 fps</option>
+  </select></label>
+  <span id="time"></span>
+</div>
+<div id="info"><span id="arase"></span> <span id="status"></span></div>
+<div id="plot2d"></div>
+<script src="plotly.min.js"></script>
+<script src="viewer.js"></script>
+</body>
+</html>
