@@ -128,9 +128,9 @@ Sharing
 Copy the whole web/ folder (with data/) to another computer and run step 3 there, or put
 web/ on any static web host (GitHub Pages, a university web space): no server code is needed.
 
-GitHub Pages: this folder is the git repository github.com/PengYululu/Arase_SAMI_website.
+GitHub Pages: this folder is the git repository github.com/PengYululu/SAMI_Arase_website.
 Pages serves the main branch root; index.html there forwards to web/, so the site is
-    https://pengyululu.github.io/Arase_SAMI_website/
+    https://pengyululu.github.io/SAMI_Arase_website/
 To update it after re-running step 1 / step 2 or editing the page:
     git add -A && git commit -m "update" && git push
 The site refreshes about a minute after the push. .nojekyll tells Pages to serve the files as is.
