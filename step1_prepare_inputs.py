@@ -5,7 +5,7 @@
 # 4. web/data/static.json : grids, coastlines, plot settings
 #    web/data/arase.json  : Arase L, MLT, MLAT, L3 Ne, quality flag on the 1-min grid, and the inbound / outbound
 #                           legs (arase_inout of the notebook)
-#    inputs/arase_track.npz: Arase GSM x, y, z on the 1-min grid (used by step 2 for SAMI Ne along the orbit)
+#    inputs/arase_track.npz: Arase R, MLAT, MLT (and GSM x, y, z) on the 1-min grid (step 2: SAMI Ne along the orbit)
 #    web/data/solarwind.json: IMF By, Bz (SWMF IMF input) and OMNI E field on the 1-min grid
 # 5. copy plotly.min.js (from the installed python plotly) into web/, so the page works offline
 # Run:  python3 step1_prepare_inputs.py
@@ -95,9 +95,11 @@ L_1min    = np.interp(hours_l3, orb_hours[gL], L90[gL])
 mlt_1min  = np.mod(np.degrees(np.interp(hours_l3, orb_hours, np.unwrap(np.radians(rmlatmlt[:, 2] * 15)))) / 15, 24)
 mlat_1min = np.interp(hours_l3, orb_hours, rmlatmlt[:, 1])
 no_orb = (hours_l3 < orb_hours.min()) | (hours_l3 > orb_hours.max())
+r_1min    = np.interp(hours_l3, orb_hours, rmlatmlt[:, 0])                                         # R (Re)
 gsm_1min  = np.column_stack([np.interp(hours_l3, orb_hours, pos_gsm[:, k]) for k in range(3)])   # [n, 3] Re
-L_1min[no_orb] = np.nan;  mlt_1min[no_orb] = np.nan;  mlat_1min[no_orb] = np.nan;  gsm_1min[no_orb] = np.nan
-np.savez(os.path.join(INPUT_DIR, 'arase_track.npz'), hours_l3=hours_l3, gsm_1min=gsm_1min)
+L_1min[no_orb] = np.nan;  mlt_1min[no_orb] = np.nan;  mlat_1min[no_orb] = np.nan;  r_1min[no_orb] = np.nan;  gsm_1min[no_orb] = np.nan
+np.savez(os.path.join(INPUT_DIR, 'arase_track.npz'), hours_l3=hours_l3, r_1min=r_1min, mlat_1min=mlat_1min,
+         mlt_1min=mlt_1min, gsm_1min=gsm_1min)
 
 
 ## ===== inbound / outbound legs (arase_inout of the notebook, unchanged) =====

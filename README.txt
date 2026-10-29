@@ -16,8 +16,8 @@ Each time step shows (same as the "SAMI-Arase 3D" cell of sami_arase_plasmaspher
     arase_inout of the notebook): SAMI3 (solid blue) and Arase L3 (dotted red) for the whole
     leg, with a dot on each line at the current time that moves along the lines as time
     advances; the panel switches to the next leg when the time enters it. SAMI3 Ne here is the
-    notebook's SAMI-Arase step 2 (sami_ne_gsm): the SAMI cube taken as GSM lat / lon / alt,
-    sampled at the Arase GSM position, linear in time between SAMI outputs (with SHIFT)
+    notebook's SAMI-Arase step 2 (sami_ne_mag): Arase MLAT, MLT, R mapped to SAMI mlat, mlon, alt
+    (MLT -> mlon = 15 (MLT - UT) + 72 at each SAMI output's UT), linear in time between outputs (with SHIFT)
   - below (scroll down; the time controls stay pinned at the top of the window): three panels
     on one shared time axis, as in the OMNI section of swmf_omni.ipynb:
       IMF By and Bz (nT, GSM, from the SWMF IMF input imf20241009_12.dat)
@@ -43,7 +43,7 @@ Folder contents
     arase/                   copied Arase CDFs: erg_orb_l2_YYYYMMDD_v05.cdf,
                              erg_pwe_hfa_l3_1min_YYYYMMDD_v06_11.cdf (2024-10-10 .. 12)
     sami_static.npz          SAMI altitude grid, list of SAMI output times, output cadence
-    arase_track.npz          Arase GSM x, y, z on the 1-min grid (for step 2)
+    arase_track.npz          Arase R, MLAT, MLT (and GSM) on the 1-min grid (for step 2)
     solarwind/               copied IMF and OMNI files (IMF_FILE, OMNI_FILE in config.py)
   web/                       the website (this is the folder that is served)
     index.html               page layout and controls
@@ -80,7 +80,7 @@ Step 1. Prepare inputs and static data (~1 min):
           (downloads them if they are missing there)
         - puts Arase L (90 deg pitch angle), MLT, MLAT on the 1-min L3 grid, and L3 Ne,
           quality flag, and the inbound / outbound legs -> web/data/arase.json
-        - Arase GSM position -> inputs/arase_track.npz
+        - Arase R, MLAT, MLT -> inputs/arase_track.npz
         - copies the IMF and OMNI files from SW_SRC_DIR into inputs/solarwind/ and writes
           By, Bz, E field -> web/data/solarwind.json
         - reads the SAMI grid and time.dat files -> inputs/sami_static.npz
@@ -95,7 +95,7 @@ Step 2. Build one frame per SAMI output (~1 min for all 480):
         - isosurfaces (skimage marching_cubes) of log10(Ne) above layer K0, vertices mapped
           to x, y, z (Re) at that UT with MLT = (mlon - 72)/15 + UT, noon at +X
         - equatorial plane log10(ne[45, :, :]) and the TEC map (poles filled)
-        - SAMI Ne at the Arase GSM position for every minute between this and the previous output
+        - SAMI Ne at the Arase R, MLAT, MLT for every minute between this and the previous output
         - writes web/data/frames/yymmdd_HHMM.bin and, at the end, web/data/sami_track.json and
           web/data/manifest.json
         Quick test with fewer frames:  python3 step2_build_frames.py --every 10

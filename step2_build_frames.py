@@ -5,7 +5,7 @@
 #   - equatorial plane log10(ne[45, :, :])      [nalt, nlon+1]
 #   - Earth TEC map (pole rows filled)          [nlat+2, nlon+1]
 # written to web/data/frames/yymmdd_HHMM.bin (SAMI file time). The byte layout of each file is in manifest.json.
-# Also SAMI Ne at the Arase position on the 1-min grid (notebook SAMI-Arase step 2, sami_ne_gsm) -> web/data/sami_track.json
+# Also SAMI Ne at the Arase position on the 1-min grid (notebook SAMI-Arase step 2, sami_ne_mag) -> web/data/sami_track.json
 # Run:  python3 step2_build_frames.py                 (all SAMI outputs, rewrites every frame and manifest.json)
 #       python3 step2_build_frames.py --every 5       (every 5th SAMI output only, for a quick test)
 import os
@@ -31,18 +31,17 @@ sami_t   = [datetime.datetime.strptime(s, '%Y-%m-%d %H:%M:%S.%f') for s in st['s
 t0       = datetime.datetime.strptime(T0_STR, '%Y-%m-%d')
 os.makedirs(FRAME_DIR, exist_ok=True)
 
-# ---- Arase GSM position (step 1) -> points for SAMI Ne along the orbit, as sami_ne_gsm in the notebook ----
-# The SAMI cube ne[la, lo, height_pla] is taken as GSM lat / lon / altitude (the notebook's assumption), with the
-# notebook's axes: la, lo = calc_tec bin edges, height_pla = alt_grid[:nalt]
+# ---- Arase R, MLAT, MLT (step 1) -> SAMI Ne along the orbit, as sami_ne_mag in the notebook ----
+# The SAMI cube ne[la, lo, height_pla] is on SAMI's Earth-fixed magnetic grid. Arase MLAT is la, MLT -> mlon with
+# mlon = 15 (MLT - ut) + 72 at each SAMI output's own ut, altitude = (R - 1) Re. Notebook axes:
+# la = calc_tec lat bin edges, lo = mlon bin centres (wrapped on both sides), height_pla = alt_grid[1:nalt+1]
 trk      = np.load(os.path.join(INPUT_DIR, 'arase_track.npz'))
-h_trk    = trk['hours_l3'];  gsm = trk['gsm_1min']
-r_trk    = np.linalg.norm(gsm, axis=1)
-with np.errstate(invalid='ignore'):
-    pts_trk = np.c_[np.degrees(np.arcsin(gsm[:, 2] / r_trk)),                      # GSM latitude
-                    np.mod(np.degrees(np.arctan2(gsm[:, 1], gsm[:, 0])), 360),      # GSM longitude, 0-360
-                    (r_trk - 1) * Re]                                               # altitude (km)
+h_trk    = trk['hours_l3']
+alt_trk  = (trk['r_1min'] - 1) * Re
+mlat_trk = trk['mlat_1min'];  mlt_trk = trk['mlt_1min']
+ok_trk   = np.isfinite(alt_trk) & np.isfinite(mlat_trk) & np.isfinite(mlt_trk)
 ne_trk   = np.full(h_trk.size, np.nan)
-prev     = None                                                                     # (h, log10 Ne at all track points)
+prev     = None                                                                     # previous output: (h, ut, interpolator)
 
 
 def phi_of(lon, ut):
@@ -72,14 +71,18 @@ for n, t in enumerate(sami_t):
     ne_w  = np.concatenate([ne, ne[:, :1, :]], axis=1)                # closed across 0/360 deg
 
     # SAMI Ne along the Arase orbit: log10 Ne at this output, linear in time from the previous output
-    la = np.linspace(-85, 85, nlat + 1)[:-1];  lo = np.linspace(0, 360, nlon + 1)[:-1]
-    itp = RegularGridInterpolator((la, np.r_[lo, lo[0] + 360], alt_grid[:nalt]),
-                                  np.log10(np.clip(ne_w, 1e-3, None)), bounds_error=False, fill_value=np.nan)
+    la   = np.linspace(-85, 85, nlat + 1)[:-1]
+    lo_c = np.linspace(0, 360, nlon + 1)[:-1] + 180. / nlon                        # mlon bin centres
+    lg   = np.log10(np.clip(ne, 1e-3, None))
+    itp  = RegularGridInterpolator((la, np.r_[lo_c[-1] - 360, lo_c, lo_c[0] + 360], alt_grid[1:nalt + 1]),
+                                   np.concatenate([lg[:, -1:, :], lg, lg[:, :1, :]], axis=1),
+                                   bounds_error=False, fill_value=np.nan)
     if prev is not None:
-        m = (h_trk >= prev[0]) & (h_trk < h_real) & np.isfinite(r_trk)
+        m = (h_trk >= prev[0]) & (h_trk < h_real) & ok_trk
         w = (h_trk[m] - prev[0]) / (h_real - prev[0])
-        ne_trk[m] = 10.**((1 - w) * itp_prev(pts_trk[m]) + w * itp(pts_trk[m]))
-    prev, itp_prev = (h_real,), itp
+        at = lambda u, f: f(np.c_[mlat_trk[m], np.mod(15 * (mlt_trk[m] - u) + MLON_OFFSET, 360), alt_trk[m]])
+        ne_trk[m] = 10.**((1 - w) * at(prev[1], prev[2]) + w * at(ut, itp))
+    prev = (h_real, ut, itp)
 
     buf = bytearray()
     # equatorial plane, la[45] = 0
