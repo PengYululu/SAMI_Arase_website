@@ -27,13 +27,38 @@
   #plot2d { width: 100%; height: 560px; }
   .err { padding: 24px 16px; color: #b91c1c; }
   label { color: var(--muted); }
+  #hrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+  #evtitle { color: var(--accent); }
+  #evpick select { font: inherit; padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  /* first page: choose an event */
+  #chooser { display: none; max-width: 980px; margin: 0 auto; padding: 28px 16px 40px; }
+  #chooser h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  #chooser p { color: var(--muted); margin: 0 0 18px; }
+  #cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+  .card { display: flex; flex-direction: column; gap: 6px; text-align: left; font: inherit; color: inherit; padding: 16px 18px;
+          border: 1px solid var(--line); border-radius: 10px; background: var(--panel); cursor: pointer; }
+  .card:hover, .card:focus-visible { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, .15); }
+  .ctitle { font-size: 17px; font-weight: 600; }
+  .cdates { font-variant-numeric: tabular-nums; }
+  .cdesc, .cmeta { color: var(--muted); font-size: 13px; }
+  body.choosing #chooser { display: block; }
+  body.choosing #main, body.choosing #controls, body.choosing #info, body.choosing #plot2d,
+  body.choosing #subtitle, body.choosing #evpick, body.choosing #evtitle { display: none; }
 </style>
 </head>
 <body>
 <header>
-  <h1>SAMI3 electron density + Arase L3</h1>
+  <div id="hrow">
+    <h1>SAMI3 electron density + Arase L3 <span id="evtitle"></span></h1>
+    <label id="evpick">event <select id="event" aria-label="event"></select></label>
+  </div>
   <div id="subtitle">Drag to rotate, scroll to zoom, click legend items to hide them. The view stays where you leave it while the time changes.</div>
 </header>
+<section id="chooser">
+  <h2>Choose an event</h2>
+  <p>Each event shows the solar wind conditions, the 3D SAMI3 plasmasphere with Arase, and SAMI3 vs Arase along the inbound / outbound legs. You can switch events later with the menu at the top.</p>
+  <div id="cards"></div>
+</section>
 <div id="main">
   <div id="plot3d"></div>
   <div id="plotleg"></div>

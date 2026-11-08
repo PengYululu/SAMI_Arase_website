@@ -8,10 +8,11 @@
 #    inputs/arase_track.npz: Arase R, MLAT, MLT (and GSM x, y, z) on the 1-min grid (step 2: SAMI Ne along the orbit)
 #    web/data/solarwind.json: IMF By, Bz (SWMF IMF input) and OMNI E field on the 1-min grid
 # 5. copy plotly.min.js (from the installed python plotly) into web/, so the page works offline
-# Run:  python3 step1_prepare_inputs.py
+# Run:  python3 step1_prepare_inputs.py --event 20230423      (event keys: EVENTS in config.py)
 import os
 import sys
 import json
+import argparse
 import shutil
 import datetime
 import urllib.request
@@ -22,7 +23,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import *
 from SAMI_functions import read_info_file, read_time_file, read_coordinates
 
+ap = argparse.ArgumentParser()
+ap.add_argument('--event', default=DEFAULT_EVENT, choices=list(EVENTS), help='event key in config.EVENTS')
+args = ap.parse_args()
+globals().update(load_event(args.event))           # SAMI_*, T0_STR, NDAYS, SHIFT, ... DATA_DIR = web/data/<event>/
+print('===== event %s: %s =====' % (EVENT, TITLE))
+
 os.makedirs(os.path.join(INPUT_DIR, 'arase'), exist_ok=True)
+os.makedirs(EVENT_INPUT_DIR, exist_ok=True)
 os.makedirs(FRAME_DIR, exist_ok=True)
 
 t0    = np.datetime64(T0_STR, 'ns')
@@ -98,7 +106,7 @@ no_orb = (hours_l3 < orb_hours.min()) | (hours_l3 > orb_hours.max())
 r_1min    = np.interp(hours_l3, orb_hours, rmlatmlt[:, 0])                                         # R (Re)
 gsm_1min  = np.column_stack([np.interp(hours_l3, orb_hours, pos_gsm[:, k]) for k in range(3)])   # [n, 3] Re
 L_1min[no_orb] = np.nan;  mlt_1min[no_orb] = np.nan;  mlat_1min[no_orb] = np.nan;  r_1min[no_orb] = np.nan;  gsm_1min[no_orb] = np.nan
-np.savez(os.path.join(INPUT_DIR, 'arase_track.npz'), hours_l3=hours_l3, r_1min=r_1min, mlat_1min=mlat_1min,
+np.savez(os.path.join(EVENT_INPUT_DIR, 'arase_track.npz'), hours_l3=hours_l3, r_1min=r_1min, mlat_1min=mlat_1min,
          mlt_1min=mlt_1min, gsm_1min=gsm_1min)
 
 
@@ -249,10 +257,13 @@ bAlt = bAlt - Re
 gLon, gLat, zAlt = read_coordinates(SAMI_GRID_DIR, 'glonu.dat', 'glatu.dat', 'zaltu.dat', nf, nz, nlt)
 alt_grid = np.max(bAlt, axis=2)[0] - 1                                 # km, layer k of the ne cube is at alt_grid[k+1]
 
-times = np.concatenate([read_time_file(f, SAMI_BASETIME) for f in SAMI_TIME_FILES])
+if SAMI_TIMES[0] == 'npy':                                             # saved list of datetimes (notebook: timesall.npy)
+    times = [t for t in np.load(SAMI_TIMES[1], allow_pickle=True)]
+else:                                                                  # SAMI time.dat files, hours since basetime
+    times = list(np.concatenate([read_time_file(f, SAMI_TIMES[2]) for f in SAMI_TIMES[1]]))
 sami_t = [t for t in times if os.path.isfile(SAMI_NE_DIR + t.strftime('%y%m%d_%H%M') + '.npy')]
 dt_sami = np.median(np.diff(to_hours(np.array(times, dtype='datetime64[ns]'))))
-np.savez(os.path.join(INPUT_DIR, 'sami_static.npz'), alt_grid=alt_grid, dt_sami=dt_sami,
+np.savez(os.path.join(EVENT_INPUT_DIR, 'sami_static.npz'), alt_grid=alt_grid, dt_sami=dt_sami,
          sami_t=np.array([t.strftime('%Y-%m-%d %H:%M:%S.%f') for t in sami_t]))
 print('SAMI outputs: %d, %s - %s, dt = %g min' % (len(sami_t), sami_t[0], sami_t[-1], dt_sami * 60))
 
@@ -281,13 +292,21 @@ mag[(d[:, 0] > np.radians(3)) | (np.abs(mag[:, 0]) > np.abs(bLat[m]).max() - 1)]
 cl[ok] = mag
 
 ## ===== 4. static.json: grids + settings for the viewer =====
+# grid sizes come from the data: ne cube [nlat, nlon, nalt] and the TEC map [ntl, ntn] (may differ from ne);
+# mlon is averaged to at most MAX_NLON bins for the website meshes (lon_factor in config.py, same in step 2)
 nlat, nlon, nalt = np.load(SAMI_NE_DIR + sami_t[0].strftime('%y%m%d_%H%M') + '.npy', mmap_mode='r').shape
-lat_c = np.linspace(-85, 85, nlat + 1)[:-1] + 85. / nlat               # bin centres used by calc_tec
-lon_c = np.linspace(0, 360, nlon + 1)[:-1] + 180. / nlon
-lon_w = np.r_[lon_c, lon_c[0] + 360]                                   # closed across 0/360 deg
+tec_files = [SAMI_TEC_DIR + t.strftime('%Y%m%d_%H%M') + '_tmp_inMLON.npy' for t in sami_t]
+tec_files = [f for f in tec_files if os.path.isfile(f)]
+ntl, ntn  = np.load(tec_files[0], mmap_mode='r').shape if tec_files else (nlat, nlon)
+nlon_d, ntn_d = nlon // lon_factor(nlon), ntn // lon_factor(ntn)
+lat_t = np.linspace(-85, 85, ntl + 1)[:-1] + 85. / ntl                 # bin centres used by calc_tec
+closed_lon = lambda n: np.r_[np.linspace(0, 360, n + 1)[:-1] + 180. / n, 180. / n + 360]   # closed across 0/360 deg
+print('SAMI ne grid %d mlat x %d mlon x %d alt, TEC %d x %d (%d TEC files); website mlon bins: ne %d, TEC %d'
+      % (nlat, nlon, nalt, ntl, ntn, len(tec_files), nlon_d, ntn_d))
 static = dict(
-    t0=T0_STR, shift=SHIFT, dt_sami_min=round(float(dt_sami * 60), 4), mlon_offset=MLON_OFFSET,
-    lon=nan_to_none(lon_w), lat_earth=nan_to_none(np.r_[-90, lat_c, 90]),
+    event=EVENT, title=TITLE, t0=T0_STR, shift=SHIFT, dt_sami_min=round(float(dt_sami * 60), 4), mlon_offset=MLON_OFFSET,
+    grid=dict(nlat=nlat, nlon=nlon, nalt=nalt, ntl=ntl, ntn=ntn),
+    lon=nan_to_none(closed_lon(nlon_d)), lon_tec=nan_to_none(closed_lon(ntn_d)), lat_earth=nan_to_none(np.r_[-90, lat_t, 90]),
     r_plane=nan_to_none((alt_grid[1:nalt + 1] + Re) / Re, 5),
     coast_mlat=nan_to_none(cl[:, 0], 3), coast_mlon=nan_to_none(cl[:, 1], 3),
     settings=dict(levels=LEVELS, colors=LV_COLOR, alphas=LV_ALPHA, k0=K0, step_size=STEP_SIZE, lim=LIM,
@@ -296,6 +315,7 @@ static = dict(
 with open(os.path.join(DATA_DIR, 'static.json'), 'w') as f:
     json.dump(static, f, separators=(',', ':'))
 print('wrote ' + os.path.join(DATA_DIR, 'static.json'))
+write_events_json()
 
 ## ===== 5. plotly.js for the page =====
 import plotly

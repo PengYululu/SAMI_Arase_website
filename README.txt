@@ -2,7 +2,11 @@ SAMI3 + Arase 3D website
 ========================
 
 An interactive web page that steps through every SAMI3 output in time ("a video") and keeps
-the 3D Plotly view interactive: drag the time bar or press Play, stop anywhere, then rotate,
+the 3D Plotly view interactive. The page opens with a chooser of the events (storms) that have
+been built; the menu at the top switches events later, and  ?event=<id>  links straight to one:
+  20241010   October 2024 storm (SAMI 180 mlon, 6-min outputs, SHIFT = 3)
+  20230423   April 2023 storm   (SAMI high-res 720 mlon, 6-min outputs, SHIFT = 0)
+For each event: drag the time bar or press Play, stop anywhere, then rotate,
 zoom and hide layers as in the notebook. The camera stays where you leave it while the time
 changes.
 
@@ -20,13 +24,17 @@ Each time step shows (same as the "SAMI-Arase 3D" cell of sami_arase_plasmaspher
     (MLT -> mlon = 15 (MLT - UT) + 72 at each SAMI output's UT), linear in time between outputs (with SHIFT)
   - below (scroll down; the time controls stay pinned at the top of the window): three panels
     on one shared time axis, as in the OMNI section of swmf_omni.ipynb:
-      IMF By and Bz (nT, GSM, from the SWMF IMF input imf20241009_12.dat)
-      solar wind electric field (mV/m, OMNI 1-min, omni_20241009_12.txt; 999.99 = gap)
+      IMF By and Bz (nT, GSM, from the SWMF IMF input, IMF_FILE of the event)
+      solar wind electric field (mV/m, OMNI 1-min, OMNI_FILE of the event; 999.99 = gap)
       the Arase L3 Ne time series with a red cursor at the current time
     (click on it to jump to that time)
 Frame: +X = noon (Sun), +Y = dusk, Z up. Initial view: Sun on the left, dusk on the right.
 Time: the title shows the real (Arase) UT. SAMI file at real time T is the one at T + SHIFT
-steps (SHIFT = 3, 6-min outputs -> +18 min), as in the notebook.
+steps (2024: SHIFT = 3, 6-min outputs -> +18 min; 2023: SHIFT = 0), as in the notebook.
+Grids: the mlat / mlon / alt sizes of the SAMI Ne cube and of the TEC map are read from the files
+(2024: 180 mlon, 2023: 720 mlon). For the website meshes (isosurfaces, plane, Earth) mlon is
+averaged to at most MAX_NLON = 180 bins, so frames stay ~0.55 MB; SAMI Ne along the Arase orbit
+(Ne vs L panel) uses the full grid.
 
 The notebook sami_arase_plasmasphere.ipynb is not used or changed by any of this; the code
 was copied from it into the scripts below.
@@ -35,70 +43,77 @@ was copied from it into the scripts below.
 Folder contents
 ---------------
   README.txt                 this file
-  config.py                  all paths and plot settings (edit here)
+  config.py                  EVENTS (paths, times, SHIFT, solar wind files per event) and plot settings
   SAMI_functions.py          copy of ../SAMI_functions.py (SAMI grid / time readers)
   step1_prepare_inputs.py    step 1: copy Arase data, read SAMI grid, write static website data
   step2_build_frames.py      step 2: one data file per SAMI time step
   inputs/
-    arase/                   copied Arase CDFs: erg_orb_l2_YYYYMMDD_v05.cdf,
-                             erg_pwe_hfa_l3_1min_YYYYMMDD_v06_11.cdf (2024-10-10 .. 12)
-    sami_static.npz          SAMI altitude grid, list of SAMI output times, output cadence
-    arase_track.npz          Arase R, MLAT, MLT (and GSM) on the 1-min grid (for step 2)
-    solarwind/               copied IMF and OMNI files (IMF_FILE, OMNI_FILE in config.py)
+    arase/                   copied Arase CDFs (all events): erg_orb_l2_YYYYMMDD_v05.cdf,
+                             erg_pwe_hfa_l3_1min_YYYYMMDD_v06_11.cdf
+    solarwind/               copied IMF and OMNI files (IMF_FILE, OMNI_FILE of each event)
+    <event>/sami_static.npz  SAMI altitude grid, list of SAMI output times, output cadence
+    <event>/arase_track.npz  Arase R, MLAT, MLT (and GSM) on the 1-min grid (for step 2)
   web/                       the website (this is the folder that is served)
-    index.html               page layout and controls
+    index.html               page layout, event chooser and controls
     viewer.js                loads the data and draws the figures
     plotly.min.js            copy of plotly.js from the installed python plotly (works offline)
-    data/static.json         grids, coastlines in SAMI mlat/mlon, plot settings
-    data/arase.json          Arase L, MLT, MLAT, L3 Ne, quality flag on a 1-min grid, legs
-    data/sami_track.json     SAMI Ne at the Arase position on the same 1-min grid
-    data/solarwind.json      IMF By, Bz and OMNI E field on a 1-min grid
-    data/manifest.json       list of time steps and the byte layout of each frame file
-    data/frames/*.bin        one file per SAMI output, named by SAMI time yymmdd_HHMM.bin
-                             (480 files, ~0.55 MB each, ~270 MB in total)
+    data/events.json         the events offered by the page (written by step 1 / step 2)
+    data/<event>/static.json      grids, coastlines in SAMI mlat/mlon, plot settings
+    data/<event>/arase.json       Arase L, MLT, MLAT, L3 Ne, quality flag on a 1-min grid, legs
+    data/<event>/sami_track.json  SAMI Ne at the Arase position on the same 1-min grid
+    data/<event>/solarwind.json   IMF By, Bz and OMNI E field on a 1-min grid
+    data/<event>/manifest.json    list of time steps and the byte layout of each frame file
+    data/<event>/frames/*.bin     one file per SAMI output, named by SAMI time yymmdd_HHMM.bin
+                                  (~0.55 MB each; 2024: 480 files ~260 MB, 2023: 387 files ~215 MB)
 
-Not copied (too large, ~4 GB): the SAMI cubes and TEC maps. They are read from the external
-drive in step 2 only; the website itself does not need the drive.
-  SAMI Ne cubes : /Volumes/ExtremePro/GITMSAMI_20241010_compass_grid/SAMI_equiplane/yymmdd_HHMM.npy
-  SAMI TEC maps : /Volumes/ExtremePro/GITMSAMI_20241010_compass_grid/SAMIdata/SAMIdata_npy/YYYYMMDD_HHMM_tmp_inMLON.npy
-  SAMI grid     : /Volumes/ExtremePro/GITMSAMI_20241010_compass_grid/SAMIdata/20241011_real/
+Not copied (too large: ~4 GB for 2024, ~22 GB for 2023): the SAMI cubes and TEC maps. They are
+read from the external drive in steps 1 and 2 only; the website itself does not need the drive.
+  2024 (drive ExtremePro): /Volumes/ExtremePro/GITMSAMI_20241010_compass_grid/
+      SAMI_equiplane/yymmdd_HHMM.npy, SAMIdata/SAMIdata_npy/YYYYMMDD_HHMM_tmp_inMLON.npy, grid SAMIdata/20241011_real/
+  2023 (drive 1T): /Volumes/1T/GITMSAMI_20230422_hires/SAMIdata_v3/
+      SAMI_equiplane/yymmdd_HHMM.npy (times: SAMI_equiplane/timesall.npy), SAMI_tec/YYYYMMDD_HHMM_tmp_inMLON.npy,
+      grid 20230423_1/
 
 
 Procedure
 ---------
 Python: the anaconda python3 (needs numpy, scipy, scikit-image, cdflib, cartopy, plotly).
-The external drive ExtremePro must be mounted for steps 1 and 2.
+The external drive of the event must be mounted for steps 1 and 2. Every step takes the event
+key (EVENTS in config.py); run steps 1 and 2 once per event.
 
 Step 0. (optional) edit config.py
+        A new event: add an entry to EVENTS (SAMI paths, SAMI_TIMES, T0_STR, NDAYS, solar wind
+        files, SHIFT, TITLE, DESCRIPTION), then steps 1 and 2 with --event <key>.
         Paths, SHIFT, isosurface levels / colours / opacity, K0, STEP_SIZE (mesh detail),
         axis range, colour ranges, plane opacity, dot size, orbit track length, initial camera.
 
 Step 1. Prepare inputs and static data (~1 min):
             cd /Users/yulupeng/Documents/AAA_research/Code/Arase_SAMI_website
-            python3 step1_prepare_inputs.py
+            python3 step1_prepare_inputs.py --event 20230423
+        (below, web/data/ means web/data/<event>/)
         - copies the Arase orbit and HFA L3 CDFs from ../arase_pwe/ into inputs/arase/
           (downloads them if they are missing there)
         - puts Arase L (90 deg pitch angle), MLT, MLAT on the 1-min L3 grid, and L3 Ne,
           quality flag, and the inbound / outbound legs -> web/data/arase.json
-        - Arase R, MLAT, MLT -> inputs/arase_track.npz
+        - Arase R, MLAT, MLT -> inputs/<event>/arase_track.npz
         - copies the IMF and OMNI files from SW_SRC_DIR into inputs/solarwind/ and writes
           By, Bz, E field -> web/data/solarwind.json
-        - reads the SAMI grid and time.dat files -> inputs/sami_static.npz
+        - reads the SAMI grid and the SAMI output times -> inputs/<event>/sami_static.npz
         - maps the Natural Earth coastlines to SAMI mlat/mlon with the SAMI grid itself
           (same method as coast_mag in the notebook)
-        - writes web/data/static.json and copies plotly.min.js into web/
+        - writes web/data/static.json, web/data/events.json and copies plotly.min.js into web/
 
-Step 2. Build one frame per SAMI output (~1 min for all 480):
-            python3 step2_build_frames.py
+Step 2. Build one frame per SAMI output (~1 min for the 480 of 2024, ~3 min for the 387 of 2023):
+            python3 step2_build_frames.py --event 20230423
         For every SAMI output:
-        - loads the Ne cube, closes it across 0/360 deg mlon
+        - loads the Ne cube; SAMI Ne at the Arase R, MLAT, MLT (full grid)
+        - averages mlon to at most MAX_NLON bins, closes it across 0/360 deg mlon
         - isosurfaces (skimage marching_cubes) of log10(Ne) above layer K0, vertices mapped
           to x, y, z (Re) at that UT with MLT = (mlon - 72)/15 + UT, noon at +X
         - equatorial plane log10(ne[45, :, :]) and the TEC map (poles filled)
-        - SAMI Ne at the Arase R, MLAT, MLT for every minute between this and the previous output
-        - writes web/data/frames/yymmdd_HHMM.bin and, at the end, web/data/sami_track.json and
-          web/data/manifest.json
-        Quick test with fewer frames:  python3 step2_build_frames.py --every 10
+        - writes web/data/frames/yymmdd_HHMM.bin and, at the end, web/data/sami_track.json,
+          web/data/manifest.json and web/data/events.json
+        Quick test with fewer frames:  python3 step2_build_frames.py --event 20230423 --every 10
         (this rewrites manifest.json with only those frames; run without --every for all)
 
 Step 3. Open the website. Browsers do not let a page opened as a file read the data files,

@@ -2,12 +2,14 @@
 # For every SAMI output (sami_t from step 1):
 #   - isosurfaces of ne[:, :, K0:] at LEVELS (marching_cubes, STEP_SIZE), vertices already in x, y, z (Re)
 #     in the SM-like frame of the notebook (+X = noon, +Y = dusk) at that UT
-#   - equatorial plane log10(ne[45, :, :])      [nalt, nlon+1]
-#   - Earth TEC map (pole rows filled)          [nlat+2, nlon+1]
-# written to web/data/frames/yymmdd_HHMM.bin (SAMI file time). The byte layout of each file is in manifest.json.
+#   - equatorial plane log10(ne[nlat//2, :, :]) [nalt, nlon_d+1]  (nlon_d = website mlon bins)
+#   - Earth TEC map (pole rows filled)          [ntl+2, ntn_d+1]  (TEC grid)
+# written to web/data/<event>/frames/yymmdd_HHMM.bin (SAMI file time). The byte layout of each file is in manifest.json.
 # Also SAMI Ne at the Arase position on the 1-min grid (notebook SAMI-Arase step 2, sami_ne_mag) -> web/data/sami_track.json
-# Run:  python3 step2_build_frames.py                 (all SAMI outputs, rewrites every frame and manifest.json)
-#       python3 step2_build_frames.py --every 5       (every 5th SAMI output only, for a quick test)
+# Grid sizes (mlat, mlon, alt of ne; mlat, mlon of TEC) are read from each file. For the website meshes mlon is averaged
+# to at most MAX_NLON bins (config.py; e.g. 720 -> 180); SAMI Ne along the Arase orbit uses the full grid.
+# Run:  python3 step2_build_frames.py --event 20230423             (all SAMI outputs, rewrites every frame and manifest.json)
+#       python3 step2_build_frames.py --event 20230423 --every 5   (every 5th SAMI output only, for a quick test)
 import os
 import sys
 import json
@@ -21,10 +23,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import *
 
 ap = argparse.ArgumentParser()
+ap.add_argument('--event', default=DEFAULT_EVENT, choices=list(EVENTS), help='event key in config.EVENTS')
 ap.add_argument('--every', type=int, default=1, help='use every N-th SAMI output')
 args = ap.parse_args()
+globals().update(load_event(args.event))           # SAMI_*, T0_STR, SHIFT, ... DATA_DIR = web/data/<event>/
+print('===== event %s: %s =====' % (EVENT, TITLE))
 
-st       = np.load(os.path.join(INPUT_DIR, 'sami_static.npz'))
+st       = np.load(os.path.join(EVENT_INPUT_DIR, 'sami_static.npz'))
 alt_grid = st['alt_grid']
 dt_sami  = float(st['dt_sami'])
 sami_t   = [datetime.datetime.strptime(s, '%Y-%m-%d %H:%M:%S.%f') for s in st['sami_t']][::args.every]
@@ -35,13 +40,18 @@ os.makedirs(FRAME_DIR, exist_ok=True)
 # The SAMI cube ne[la, lo, height_pla] is on SAMI's Earth-fixed magnetic grid. Arase MLAT is la, MLT -> mlon with
 # mlon = 15 (MLT - ut) + 72 at each SAMI output's own ut, altitude = (R - 1) Re. Notebook axes:
 # la = calc_tec lat bin edges, lo = mlon bin centres (wrapped on both sides), height_pla = alt_grid[1:nalt+1]
-trk      = np.load(os.path.join(INPUT_DIR, 'arase_track.npz'))
+trk      = np.load(os.path.join(EVENT_INPUT_DIR, 'arase_track.npz'))
 h_trk    = trk['hours_l3']
 alt_trk  = (trk['r_1min'] - 1) * Re
 mlat_trk = trk['mlat_1min'];  mlt_trk = trk['mlt_1min']
 ok_trk   = np.isfinite(alt_trk) & np.isfinite(mlat_trk) & np.isfinite(mlt_trk)
 ne_trk   = np.full(h_trk.size, np.nan)
 prev     = None                                                                     # previous output: (h, ut, interpolator)
+
+
+with open(os.path.join(DATA_DIR, 'static.json')) as f:                            # grids of the viewer (step 1)
+    _st = json.load(f)
+static_lat_earth, static_lon_tec = _st['lat_earth'], _st['lon_tec']
 
 
 def phi_of(lon, ut):
@@ -63,14 +73,10 @@ for n, t in enumerate(sami_t):
     ut    = t.hour + t.minute / 60.                                  # notebook uses hour + minute only
     h_real = (t - t0).total_seconds() / 3600. - SHIFT * dt_sami      # real (Arase) time, hours since T0_STR
 
-    ne = np.load(SAMI_NE_DIR + t.strftime('%y%m%d_%H%M') + '.npy')   # [90 mlat, 180 mlon, 118 alt]
+    ne = np.load(SAMI_NE_DIR + t.strftime('%y%m%d_%H%M') + '.npy')   # [nlat mlat, nlon mlon, nalt alt], sizes from the file
     nlat, nlon, nalt = ne.shape
-    lat_c = np.linspace(-85, 85, nlat + 1)[:-1] + 85. / nlat
-    lon_c = np.linspace(0, 360, nlon + 1)[:-1] + 180. / nlon
-    lon_w = np.r_[lon_c, lon_c[0] + 360]
-    ne_w  = np.concatenate([ne, ne[:, :1, :]], axis=1)                # closed across 0/360 deg
 
-    # SAMI Ne along the Arase orbit: log10 Ne at this output, linear in time from the previous output
+    # SAMI Ne along the Arase orbit (full grid): log10 Ne at this output, linear in time from the previous output
     la   = np.linspace(-85, 85, nlat + 1)[:-1]
     lo_c = np.linspace(0, 360, nlon + 1)[:-1] + 180. / nlon                        # mlon bin centres
     lg   = np.log10(np.clip(ne, 1e-3, None))
@@ -84,20 +90,28 @@ for n, t in enumerate(sami_t):
         ne_trk[m] = 10.**((1 - w) * at(prev[1], prev[2]) + w * at(ut, itp))
     prev = (h_real, ut, itp)
 
+    # website meshes: mlon averaged to at most MAX_NLON bins (linear Ne), then closed across 0/360 deg
+    ne_d  = lon_reduce(ne, axis=1)
+    nlon_d = ne_d.shape[1]
+    lat_c = np.linspace(-85, 85, nlat + 1)[:-1] + 85. / nlat
+    lon_c = np.linspace(0, 360, nlon_d + 1)[:-1] + 180. / nlon_d
+    lon_w = np.r_[lon_c, lon_c[0] + 360]
+    ne_w  = np.concatenate([ne_d, ne_d[:, :1, :]], axis=1)
+
     buf = bytearray()
-    # equatorial plane, la[45] = 0
-    plane = np.log10(np.clip(ne_w[45, :, :].T, 1e-3, None)).astype(np.float32)   # [nalt, nlon+1]
+    # equatorial plane, la[nlat//2] = 0
+    plane = np.log10(np.clip(ne_w[nlat // 2, :, :].T, 1e-3, None)).astype(np.float32)   # [nalt, nlon_d+1]
     plane_off = put(buf, plane)
 
-    # Earth TEC
+    # Earth TEC (its own mlat / mlon grid, see static.json lat_earth / lon_tec)
     tec_file = SAMI_TEC_DIR + t.strftime('%Y%m%d_%H%M') + '_tmp_inMLON.npy'
     tec_ok = os.path.isfile(tec_file)
     if tec_ok:
-        tec = np.load(tec_file)
+        tec = lon_reduce(np.load(tec_file), axis=1)
         tec = np.concatenate([tec, tec[:, :1]], axis=1)
-        tec = np.vstack([np.full(nlon + 1, np.nanmean(tec[0])), tec, np.full(nlon + 1, np.nanmean(tec[-1]))])
+        tec = np.vstack([np.full(tec.shape[1], np.nanmean(tec[0])), tec, np.full(tec.shape[1], np.nanmean(tec[-1]))])
     else:
-        tec = np.full((nlat + 2, nlon + 1), np.nan)
+        tec = np.full((len(static_lat_earth), len(static_lon_tec)), np.nan)
     tec_off = put(buf, tec.astype(np.float32))
 
     # isosurfaces above layer K0 (same mapping as sami_isosurface_fig)
@@ -110,7 +124,7 @@ for n, t in enumerate(sami_t):
             continue
         v, f, _, _ = marching_cubes(logne, np.log10(lv), step_size=STEP_SIZE)
         lat = np.radians(np.interp(v[:, 0], np.arange(nlat), lat_c))
-        phi = phi_of(np.interp(v[:, 1], np.arange(nlon + 1), lon_w), ut)
+        phi = phi_of(np.interp(v[:, 1], np.arange(nlon_d + 1), lon_w), ut)
         r   = np.interp(v[:, 2], np.arange(logne.shape[2]), r_iso)
         xyz.append(np.c_[r * np.cos(lat) * np.cos(phi), r * np.cos(lat) * np.sin(phi), r * np.sin(lat)])
         faces.append(f)
@@ -143,3 +157,4 @@ print('wrote sami_track.json: SAMI Ne valid at %d of %d min' % (np.isfinite(ne_t
 with open(os.path.join(DATA_DIR, 'manifest.json'), 'w') as f:
     json.dump(dict(created=datetime.datetime.now().strftime('%Y-%m-%d %H:%M'), frames=frames), f, separators=(',', ':'))
 print('wrote manifest.json: %d frames, %.0f MB in total' % (len(frames), sum(fr['bytes'] for fr in frames) / 1e6))
+write_events_json()

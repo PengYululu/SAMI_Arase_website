@@ -1,4 +1,6 @@
 // SAMI3 + Arase 3D viewer.
+// data/events.json lists the events; the page opens with a chooser, ?event=<id> shows one event, whose files are in
+// data/<id>/ (below, data/ means that folder).
 // Reads data/static.json (grids, coastlines, settings), data/arase.json (1-min Arase L, MLT, MLAT, Ne),
 // data/manifest.json (list of frames) and one data/frames/*.bin per time step, loaded when needed.
 // data/solarwind.json: IMF By, Bz and OMNI E field (1 min) for the time series below.
@@ -10,7 +12,7 @@ const DEG = Math.PI / 180;
 const CACHE_MAX = 40;          // frames kept in memory
 const PREFETCH = 6;            // frames loaded ahead while playing
 
-const S = { st: null, arase: null, sami: null, leg: -1, man: null, i: 0, target: 0, playing: false, fps: 4, cache: new Map(),
+const S = { base: 'data/', events: null, st: null, arase: null, sami: null, leg: -1, man: null, i: 0, target: 0, playing: false, fps: 4, cache: new Map(),
             pending: null, busy: false, t0ms: 0 };
 const $ = id => document.getElementById(id);
 
@@ -41,7 +43,7 @@ function getFrame(i) {
     const p = S.cache.get(i); S.cache.delete(i); S.cache.set(i, p); return p;
   }
   const f = S.man.frames[i];
-  const p = fetch('data/frames/' + f.file)
+  const p = fetch(S.base + 'frames/' + f.file)
     .then(r => { if (!r.ok) throw new Error(f.file + ': HTTP ' + r.status); return r.arrayBuffer(); })
     .then(buf => decode(buf, f));
   p.catch(() => S.cache.delete(i));
@@ -101,20 +103,23 @@ function traces(i, fr) {
     x: m.x, y: m.y, z: m.z, i: m.i, j: m.j, k: m.k, color: set.colors[q], opacity: set.alphas[q],
     flatshading: false, lighting: { ambient: 0.5, diffuse: 0.8, specular: 0.3, roughness: 0.5 }, hoverinfo: 'name' }));
 
-  // Earth: TEC map (or white dayside / black nightside when the TEC file is missing)
+  // Earth: TEC map (or white dayside / black nightside when the TEC file is missing), on the TEC map's own mlon grid
+  const lonT = st.lon_tec || st.lon, nlT = lonT.length;
+  const phiT = lonT.map(lon => (lon - st.mlon_offset + 15 * f.ut - 180) * DEG);
+  const cospT = phiT.map(Math.cos), sinpT = phiT.map(Math.sin);
   const latE = st.lat_earth.map(v => v * DEG), nl = st.lon.length;
-  const sphere = (a, b) => [Math.cos(latE[a]) * cosp[b], Math.cos(latE[a]) * sinp[b], Math.sin(latE[a])];
+  const sphere = (a, b) => [Math.cos(latE[a]) * cospT[b], Math.cos(latE[a]) * sinpT[b], Math.sin(latE[a])];
   // lighting of a Plotly surface trace (its defaults), so the plane and Earth look as in the notebook;
   // with flat lighting the same opacity looks more solid
   const flat = { flatshading: false, lighting: { ambient: 0.8, diffuse: 0.8, specular: 0.05, roughness: 0.5, fresnel: 0.2 } };
   if (f.tec) {
-    T.push({ type: 'mesh3d', uid: 'earth', name: 'Earth (TEC)', ...gridMesh(latE.length, nl, sphere, fr.tec), ...flat,
+    T.push({ type: 'mesh3d', uid: 'earth', name: 'Earth (TEC)', ...gridMesh(latE.length, nlT, sphere, fr.tec), ...flat,
              colorscale: 'Jet', cmin: set.tec_range[0], cmax: set.tec_range[1],
              colorbar: { title: { text: 'TEC (TECU)' }, orientation: 'h', x: 0.5, y: 0.02, yanchor: 'bottom', len: 0.5, thickness: 15 },
              hovertemplate: 'TEC = %{intensity:.1f} TECU<extra>Earth</extra>' });
   } else {
-    const day = new Float32Array(latE.length * nl).map((_, q) => (cosp[q % nl] > 0 ? 1 : 0));
-    T.push({ type: 'mesh3d', uid: 'earth', name: 'Earth', ...gridMesh(latE.length, nl, sphere, day), ...flat,
+    const day = new Float32Array(latE.length * nlT).map((_, q) => (cospT[q % nlT] > 0 ? 1 : 0));
+    T.push({ type: 'mesh3d', uid: 'earth', name: 'Earth', ...gridMesh(latE.length, nlT, sphere, day), ...flat,
              colorscale: [[0, 'black'], [1, 'white']], cmin: 0, cmax: 1, showscale: false, hoverinfo: 'skip' });
   }
 
@@ -324,6 +329,20 @@ async function play() {
 function pause() { S.playing = false; $('play').textContent = '▶ Play'; }
 function step(d) { pause(); request((S.target + d + S.man.frames.length) % S.man.frames.length); }   // from the last asked-for step, so fast key presses add up
 
+// ---------- events: chooser on the first page, menu in the header ----------
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const openEvent = id => { location.search = '?event=' + encodeURIComponent(id); };   // reload: every event starts clean
+
+function showChooser() {
+  document.body.classList.add('choosing');
+  $('cards').innerHTML = S.events.events.map(e =>
+    '<button class="card" data-id="' + esc(e.id) + '"><span class="ctitle">' + esc(e.title) + '</span>' +
+    '<span class="cdates">' + esc(e.first) + ' – ' + esc(e.last) + ' UT</span>' +
+    '<span class="cdesc">' + esc(e.description) + '</span>' +
+    '<span class="cmeta">' + e.nframes + ' SAMI steps</span></button>').join('');
+  $('cards').querySelectorAll('.card').forEach(b => b.addEventListener('click', () => openEvent(b.dataset.id)));
+}
+
 // ---------- start ----------
 async function main() {
   if (location.protocol === 'file:') {
@@ -331,8 +350,20 @@ async function main() {
       'In a terminal: <code>cd Arase_SAMI_website/web &amp;&amp; python3 -m http.server 8000</code>, then open http://localhost:8000 (see README.txt).</div>');
     return;
   }
-  [S.st, S.arase, S.man, S.sami, S.sw] = await Promise.all([getJSON('data/static.json'), getJSON('data/arase.json'),
-    getJSON('data/manifest.json'), getJSON('data/sami_track.json'), getJSON('data/solarwind.json')]);
+  S.events = await getJSON('data/events.json');
+  const ev = new URLSearchParams(location.search).get('event');
+  const known = S.events.events.map(e => e.id);
+  $('event').innerHTML = S.events.events.map(e => '<option value="' + esc(e.id) + '">' + esc(e.title) + '</option>').join('');
+  $('event').addEventListener('change', e => openEvent(e.target.value));
+  if (!known.includes(ev)) { showChooser(); return; }       // first page (or an unknown ?event=): choose an event
+  $('event').value = ev;
+  const E = S.events.events.find(e => e.id === ev);
+  document.title = 'SAMI3 + Arase 3D: ' + E.title;
+  $('evtitle').textContent = E.title;
+  S.base = 'data/' + ev + '/';
+
+  [S.st, S.arase, S.man, S.sami, S.sw] = await Promise.all([getJSON(S.base + 'static.json'), getJSON(S.base + 'arase.json'),
+    getJSON(S.base + 'manifest.json'), getJSON(S.base + 'sami_track.json'), getJSON(S.base + 'solarwind.json')]);
   S.t0ms = Date.parse(S.st.t0 + 'T00:00:00Z');
   S.fps = +$('fps').value;
   $('slider').max = S.man.frames.length - 1;
