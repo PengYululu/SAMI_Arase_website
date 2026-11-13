@@ -77,6 +77,24 @@ TRACK_HR  = 3                                      # Arase orbit +/- TRACK_HR ho
 CAMERA    = dict(eye=dict(x=1.3, y=1.3, z=1.0))    # initial view: Sun (+X) on the left, dusk (+Y) on the right
 
 
+# ===== optional overlays (step3_build_overlays.py; the page loads them only when their box is ticked) =====
+# Same settings as the plasmasphere-contour-mapping and SED-edge cells of sami_arase_plasmasphere.ipynb
+OVERLAYS    = {'20241010': True}                   # events with overlays (others: the two boxes are greyed out)
+MAP_LEVELS  = [50, 500, 1000]                      # equatorial-plane Ne contours (/cc) mapped to footprints on the TEC Earth
+MAP_COLORS  = ['pink', 'orange', 'red']
+MAP_K0      = K0                                   # only contour points above alt layer MAP_K0 (0 = whole plane)
+R_FOOT      = 1.01                                 # footprints / SED edge points drawn at this radius (Re)
+MAP_MARKER  = 2                                    # footprint marker size
+SED_GRAD    = 0.03                                 # |grad TEC| threshold (TECU/km)
+SED_LON     = [200, 360]                           # MLON range of the SED search (~ American sector)
+SED_LAT     = [30, 80]                             # |MLAT| range, both hemispheres
+H_FOOT      = 350.                                 # km: edge point -> closest field-line foot point at this altitude
+EDGE_COLORS = ['pink', 'green']                    # north, south edge points (Earth and equatorial plane)
+EDGE_MARKER = 4                                    # SED edge marker size (apex diamonds: +1)
+EDGE_FL     = True                                 # also store the field lines used for the edge mapping
+FL_EVERY    = 4                                    # keep every FL_EVERY-th point of those field lines (smaller files)
+
+
 def lon_factor(nlon):
     """number of neighbouring mlon bins averaged for the website meshes, so that at most MAX_NLON bins are left"""
     if not MAX_NLON or nlon <= MAX_NLON:
@@ -122,7 +140,8 @@ def write_events_json():
         t0 = datetime.datetime.strptime(e['T0_STR'], '%Y-%m-%d')
         real = lambda h: (t0 + datetime.timedelta(hours=h)).strftime('%Y-%m-%d %H:%M')   # real (Arase) UT of a frame
         out.append(dict(id=name, title=e['TITLE'], description=e['DESCRIPTION'], nframes=len(fr),
-                        first=real(fr[0]['h']), last=real(fr[-1]['h']), shift=e['SHIFT']))
+                        first=real(fr[0]['h']), last=real(fr[-1]['h']), shift=e['SHIFT'],
+                        overlays=os.path.isfile(os.path.join(WEB_DIR, 'data', name, 'overlays.json'))))   # step 3 run
     out.sort(key=lambda d: d['id'], reverse=True)
     with open(os.path.join(WEB_DIR, 'data', 'events.json'), 'w') as f:
         json.dump(dict(default=DEFAULT_EVENT, events=out), f, indent=1)

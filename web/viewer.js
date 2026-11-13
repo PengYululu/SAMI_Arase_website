@@ -5,6 +5,9 @@
 // data/manifest.json (list of frames) and one data/frames/*.bin per time step, loaded when needed.
 // data/solarwind.json: IMF By, Bz and OMNI E field (1 min) for the time series below.
 // data/sami_track.json: SAMI Ne at the Arase position on the same 1-min bins, for the Ne-vs-L panel of the current leg.
+// data/overlays.json (optional, step3_build_overlays.py): which frames have overlay files. data/overlays/contour/*.json
+// (plasmasphere contour -> footprints on the TEC Earth) and data/overlays/sed/*.json (SED edge -> equatorial plane) are
+// fetched only while their box above the 3D view is ticked; Arase is always drawn.
 // Plotly.react with a fixed uirevision keeps the camera and legend choices while the time changes.
 'use strict';
 
@@ -13,7 +16,10 @@ const CACHE_MAX = 40;          // frames kept in memory
 const PREFETCH = 6;            // frames loaded ahead while playing
 
 const S = { base: 'data/', events: null, st: null, arase: null, sami: null, leg: -1, man: null, i: 0, target: 0, playing: false, fps: 4, cache: new Map(),
-            pending: null, busy: false, t0ms: 0 };
+            pending: null, busy: false, t0ms: 0,
+            ov: null, show: { contour: false, sed: false }, ovHave: { contour: new Set(), sed: new Set() },
+            ovCache: { contour: new Map(), sed: new Map() } };
+const OV_KINDS = ['contour', 'sed'];
 const $ = id => document.getElementById(id);
 
 // ---------- loading ----------
@@ -51,6 +57,25 @@ function getFrame(i) {
   while (S.cache.size > CACHE_MAX) S.cache.delete(S.cache.keys().next().value);
   return p;
 }
+
+// overlay of one kind for frame i: null if the box is off or the frame has no file (fetched only when needed)
+function getOverlay(kind, i) {
+  if (!S.show[kind] || !S.ovHave[kind].has(i)) return Promise.resolve(null);
+  const C = S.ovCache[kind];
+  if (C.has(i)) { const p = C.get(i); C.delete(i); C.set(i, p); return p; }
+  const f = S.man.frames[i];
+  const p = getJSON(S.base + 'overlays/' + kind + '/' + f.file.replace(/\.bin$/, '.json'));
+  p.catch(() => C.delete(i));
+  C.set(i, p);
+  while (C.size > CACHE_MAX) C.delete(C.keys().next().value);
+  return p;
+}
+async function getOverlays(i) {
+  const [contour, sed] = await Promise.all(OV_KINDS.map(k => getOverlay(k, i)));
+  return { contour, sed };
+}
+const isCached = i => S.cache.has(i) && OV_KINDS.every(k => !S.show[k] || !S.ovHave[k].has(i) || S.ovCache[k].has(i));
+function prefetch(i) { getFrame(i); OV_KINDS.forEach(k => getOverlay(k, i)); }
 
 // ---------- time helpers ----------
 const hToDate = h => new Date(S.t0ms + h * 3600e3);
@@ -91,7 +116,7 @@ function gridMesh(nr, nc, xyz, val) {
   return { x, y, z, i: Int32Array.from(I), j: Int32Array.from(J), k: Int32Array.from(K), intensity: c };
 }
 
-function traces(i, fr) {
+function traces(i, fr, ov) {
   const st = S.st, set = st.settings, f = S.man.frames[i];
   const phi = st.lon.map(lon => (lon - st.mlon_offset + 15 * f.ut - 180) * DEG);   // same as the notebook
   const cosp = phi.map(Math.cos), sinp = phi.map(Math.sin);
@@ -143,6 +168,8 @@ function traces(i, fr) {
            colorbar: { title: { text: 'Ne (/cm<sup>3</sup>)' }, tickvals: ticks, ticktext: ticks.map(t => '10<sup>' + t + '</sup>'), len: 0.6 },
            hovertemplate: 'log10 Ne = %{intensity:.2f} (/cc)<extra>equator</extra>' });
 
+  if (ov) T.push(...overlayTraces(ov));
+
   // Arase orbit +/- track_hr and the Arase dot coloured by L3 Ne on the plane's colour scale
   const k = araseIndex(f.h);
   const tx = [], ty = [], tz = [];
@@ -166,6 +193,40 @@ function traces(i, fr) {
            hovertemplate: hasDot ? ('Arase<br>L = ' + S.arase.L[k].toFixed(2) + '<br>MLT = ' + S.arase.mlt[k].toFixed(1) +
                           ' h<br>MLAT = ' + S.arase.mlat[k].toFixed(1) + ' deg<br>Ne = ' + (ne === null ? 'n/a' : ne.toPrecision(3)) +
                           ' /cc<extra></extra>') : '' });
+  return T;
+}
+
+// optional overlays, same traces as add_pla_mapping / add_sed_edge / add_edge_pla in the notebook (x, y, z precomputed)
+function overlayTraces(ov) {
+  const T = [], ms = (S.ov && S.ov.settings) || {}, zip3 = (a, b, c) => a.map((v, q) => [v, b[q], c[q]]);
+  if (ov.contour) ov.contour.levels.forEach(d => {
+    const grp = 'pm' + d.level;
+    T.push({ type: 'scatter3d', uid: 'pm_line_' + d.level, name: d.level + ' /cc contour + footprints', mode: 'lines',
+             x: d.x, y: d.y, z: d.x.map(v => v === null ? null : 0.02), line: { color: d.color, width: 5 },
+             connectgaps: false, legendgroup: grp, hoverinfo: 'skip' });
+    T.push({ type: 'scatter3d', uid: 'pm_foot_' + d.level, name: d.level + ' /cc footprints', mode: 'markers',
+             x: d.fx, y: d.fy, z: d.fz, marker: { size: ms.map_marker || 2, color: d.color },
+             customdata: zip3(d.fmlat, d.fmlon, d.fr), legendgroup: grp, showlegend: false,
+             hovertemplate: 'MLAT %{customdata[0]:.1f}, MLON %{customdata[1]:.1f}<br>apex r = %{customdata[2]:.2f} Re<extra>' +
+                            d.level + ' /cc</extra>' });
+  });
+  if (ov.sed) ov.sed.hemis.forEach(d => {
+    const grp = 'sed_' + d.hemi, em = ms.edge_marker || 4;
+    T.push({ type: 'scatter3d', uid: 'sed_edge_' + d.hemi, name: 'SED edge (' + d.hemi + ')', mode: 'markers',
+             x: d.ex, y: d.ey, z: d.ez, marker: { size: em, color: d.color, line: { color: 'black', width: 1 } },
+             customdata: zip3(d.emlon, d.emlat, d.egrad), legendgroup: grp,
+             hovertemplate: 'MLON %{customdata[0]:.1f}, MLAT %{customdata[1]:.1f}<br>|∇TEC| = %{customdata[2]:.3f} TECU/km' +
+                            '<extra>SED edge ' + d.hemi + '</extra>' });
+    T.push({ type: 'scatter3d', uid: 'sed_apex_' + d.hemi, name: 'edge -> equatorial plane (' + d.hemi + ')', mode: 'markers',
+             x: d.ax, y: d.ay, z: d.ax.map(() => 0.03),
+             marker: { size: em + 1, color: d.color, symbol: 'diamond', line: { color: 'black', width: 1 } },
+             customdata: d.ar.map((v, q) => [v, d.amlon[q], d.emlon[q], d.emlat[q], d.dist[q]]), legendgroup: grp,
+             hovertemplate: 'apex r = %{customdata[0]:.2f} Re, MLON %{customdata[1]:.1f}<br>from edge MLON %{customdata[2]:.1f}, ' +
+                            'MLAT %{customdata[3]:.1f}<br>foot %{customdata[4]:.0f} km from edge<extra>edge -> plasmasphere ' + d.hemi + '</extra>' });
+    if (d.lx.length) T.push({ type: 'scatter3d', uid: 'sed_fl_' + d.hemi, name: 'edge field lines (' + d.hemi + ')', mode: 'lines',
+             x: d.lx, y: d.ly, z: d.lz, line: { color: d.color, width: 2 }, opacity: 0.6, connectgaps: false,
+             legendgroup: grp, showlegend: false, hoverinfo: 'skip' });
+  });
   return T;
 }
 
@@ -283,8 +344,9 @@ function labels(i) {
     ' /cc' + (a.qf[k] > 0 ? ' (quality flag ' + a.qf[k] + ')' : '');
 }
 
-async function draw(i, fr) {
-  await Plotly.react('plot3d', traces(i, fr), layout3d(i), { responsive: true, displaylogo: false });
+async function draw(i, fr, ov) {
+  ovNote(i, ov);
+  await Plotly.react('plot3d', traces(i, fr, ov), layout3d(i), { responsive: true, displaylogo: false });
   Plotly.relayout('plot2d', { shapes: S.tlShapes.concat([cursorShape(i)]) });
   drawLeg(araseIndex(S.man.frames[i].h));
   S.i = i;
@@ -300,12 +362,12 @@ async function pump() {
   while (S.pending !== null) {
     const i = S.pending; S.pending = null;
     try {
-      $('status').textContent = S.cache.has(i) ? '' : 'loading…';
-      const fr = await getFrame(i);
+      $('status').textContent = isCached(i) ? '' : 'loading…';
+      const [fr, ov] = await Promise.all([getFrame(i), getOverlays(i)]);
       if (S.pending !== null) continue;                     // a newer step was asked for meanwhile
-      await draw(i, fr);
+      await draw(i, fr, ov);
       $('status').textContent = '';
-      for (const d of [1, -1]) if (i + d >= 0 && i + d < S.man.frames.length) getFrame(i + d);
+      for (const d of [1, -1]) if (i + d >= 0 && i + d < S.man.frames.length) prefetch(i + d);
     } catch (e) { $('status').textContent = String(e.message || e); }
   }
   S.busy = false;
@@ -319,9 +381,9 @@ async function play() {
   while (S.playing) {
     const t = performance.now(), i = (S.i + 1) % n;
     S.target = i;
-    for (let d = 1; d <= PREFETCH; d++) getFrame((i + d) % n);
+    for (let d = 1; d <= PREFETCH; d++) prefetch((i + d) % n);
     labels(i);
-    try { await draw(i, await getFrame(i)); } catch (e) { $('status').textContent = String(e.message || e); pause(); break; }
+    try { const [fr, ov] = await Promise.all([getFrame(i), getOverlays(i)]); await draw(i, fr, ov); } catch (e) { $('status').textContent = String(e.message || e); pause(); break; }
     const wait = 1000 / S.fps - (performance.now() - t);
     if (wait > 0) await sleep(wait);
   }
@@ -341,6 +403,35 @@ function showChooser() {
     '<span class="cdesc">' + esc(e.description) + '</span>' +
     '<span class="cmeta">' + e.nframes + ' SAMI steps</span></button>').join('');
   $('cards').querySelectorAll('.card').forEach(b => b.addEventListener('click', () => openEvent(b.dataset.id)));
+}
+
+// ---------- the two overlay boxes above the 3D view ----------
+const OV_BOX = { contour: ['ovContour', 'lbContour'], sed: ['ovSed', 'lbSed'] };
+function setupOverlayBoxes() {
+  const want = new URLSearchParams(location.search);
+  OV_KINDS.forEach(kind => {
+    const [box, lab] = OV_BOX[kind].map($), fr = S.ov && S.ov[kind] ? S.ov[kind].frames : [];
+    S.ovHave[kind] = new Set(fr);
+    if (!fr.length) {
+      box.disabled = true; box.checked = false; lab.classList.add('off');
+      lab.title = 'not built for this event (step3_build_overlays.py, OVERLAYS in config.py)';
+      return;
+    }
+    box.checked = S.show[kind] = want.get(kind) === '1';    // ?contour=1&sed=1 opens with the box ticked
+    box.addEventListener('change', () => {
+      box.blur();
+      S.show[kind] = box.checked;
+      const u = new URL(location.href);                       // keep the choice in the address (shareable link)
+      box.checked ? u.searchParams.set(kind, '1') : u.searchParams.delete(kind);
+      history.replaceState(null, '', u);
+      if (!S.playing) request(S.target);                     // redraw now; while playing the next step picks it up
+    });
+  });
+}
+function ovNote(i, ov) {
+  const miss = OV_KINDS.filter(k => S.show[k] && !(ov && ov[k]));
+  $('ovnote').textContent = miss.length ? '(no ' + miss.map(k => k === 'sed' ? 'SED edge' : 'contour mapping').join(' / ') +
+                                          ' file for this step)' : '';
 }
 
 // ---------- start ----------
@@ -364,6 +455,8 @@ async function main() {
 
   [S.st, S.arase, S.man, S.sami, S.sw] = await Promise.all([getJSON(S.base + 'static.json'), getJSON(S.base + 'arase.json'),
     getJSON(S.base + 'manifest.json'), getJSON(S.base + 'sami_track.json'), getJSON(S.base + 'solarwind.json')]);
+  S.ov = E.overlays ? await getJSON(S.base + 'overlays.json').catch(() => null) : null;   // events.json says which events have them
+  setupOverlayBoxes();
   S.t0ms = Date.parse(S.st.t0 + 'T00:00:00Z');
   S.fps = +$('fps').value;
   $('slider').max = S.man.frames.length - 1;
@@ -376,7 +469,7 @@ async function main() {
   $('next').addEventListener('click', e => { e.currentTarget.blur(); step(1); });
   $('fps').addEventListener('change', e => { S.fps = +e.target.value; });
   document.addEventListener('keydown', e => {
-    if (e.target.tagName === 'SELECT') return;
+    if (e.target.tagName === 'SELECT' || e.target.type === 'checkbox') return;
     if (e.key === ' ') { e.preventDefault(); S.playing ? pause() : play(); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }

@@ -8,7 +8,8 @@
    "nframes": 480,
    "first": "2024-10-09 23:48",
    "last": "2024-10-11 23:42",
-   "shift": 3
+   "shift": 3,
+   "overlays": true
   },
   {
    "id": "20230423",
@@ -17,7 +18,8 @@
    "nframes": 387,
    "first": "2023-04-23 00:06",
    "last": "2023-04-24 14:48",
-   "shift": 0
+   "shift": 0,
+   "overlays": false
   }
  ]
 }

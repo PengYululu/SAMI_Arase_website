@@ -28,6 +28,20 @@ Each time step shows (same as the "SAMI-Arase 3D" cell of sami_arase_plasmaspher
       solar wind electric field (mV/m, OMNI 1-min, OMNI_FILE of the event; 999.99 = gap)
       the Arase L3 Ne time series with a red cursor at the current time
     (click on it to jump to that time)
+  - optional, two boxes above the 3D view (October 2024 event; built by step 3; the files are
+    fetched only while a box is ticked, Arase is always drawn):
+      add contour mapping  the equatorial-plane Ne contours at 50 / 500 / 1000 /cc (pink / orange /
+                           red, above layer K0) followed along the SAMI field line with its apex at
+                           each contour point to its north and south ends -> footprints on the TEC
+                           Earth (notebook: add_pla_mapping, "Plasmasphere Contour mapping to TEC")
+      add SED edge         SED edge points from the SAMI TEC gradient (|grad TEC| > 0.03 TECU/km,
+                           MLON 200-360, 30 <= |MLAT| <= 80; middle of each run along an mlat row)
+                           on the Earth (north pink, south green); each one -> the SAMI field line
+                           whose foot point at 350 km is closest -> that line's apex on the
+                           equatorial plane (diamond), with the field line drawn
+                           (notebook: sami_sed_edge, add_sed_edge, add_edge_pla)
+    ?contour=1 and ?sed=1 in the address open the page with the box ticked (the address updates
+    when you click, so the link can be shared).
 Frame: +X = noon (Sun), +Y = dusk, Z up. Initial view: Sun on the left, dusk on the right.
 Time: the title shows the real (Arase) UT. SAMI file at real time T is the one at T + SHIFT
 steps (2024: SHIFT = 3, 6-min outputs -> +18 min; 2023: SHIFT = 0), as in the notebook.
@@ -47,6 +61,7 @@ Folder contents
   SAMI_functions.py          copy of ../SAMI_functions.py (SAMI grid / time readers)
   step1_prepare_inputs.py    step 1: copy Arase data, read SAMI grid, write static website data
   step2_build_frames.py      step 2: one data file per SAMI time step
+  step3_build_overlays.py    step 3 (optional): contour-mapping and SED-edge overlays per SAMI time step
   inputs/
     arase/                   copied Arase CDFs (all events): erg_orb_l2_YYYYMMDD_v05.cdf,
                              erg_pwe_hfa_l3_1min_YYYYMMDD_v06_11.cdf
@@ -65,6 +80,10 @@ Folder contents
     data/<event>/manifest.json    list of time steps and the byte layout of each frame file
     data/<event>/frames/*.bin     one file per SAMI output, named by SAMI time yymmdd_HHMM.bin
                                   (~0.55 MB each; 2024: 480 files ~260 MB, 2023: 387 files ~215 MB)
+    data/<event>/overlays.json    (step 3) overlay settings and which frames have overlay files
+    data/<event>/overlays/contour/yymmdd_HHMM.json, overlays/sed/yymmdd_HHMM.json
+                                  (step 3) x, y, z (Re) of contours, footprints, edge points, apexes and
+                                  field lines in that frame (2024: ~60 + ~30 kB each, 42 MB in total)
 
 Not copied (too large: ~4 GB for 2024, ~22 GB for 2023): the SAMI cubes and TEC maps. They are
 read from the external drive in steps 1 and 2 only; the website itself does not need the drive.
@@ -116,7 +135,14 @@ Step 2. Build one frame per SAMI output (~1 min for the 480 of 2024, ~3 min for 
         Quick test with fewer frames:  python3 step2_build_frames.py --event 20230423 --every 10
         (this rewrites manifest.json with only those frames; run without --every for all)
 
-Step 3. Open the website. Browsers do not let a page opened as a file read the data files,
+Step 3. (optional) Contour-mapping and SED-edge overlays (~1 min for the 480 of 2024):
+            python3 step3_build_overlays.py --event 20241010
+        Only for events in OVERLAYS (config.py); the settings there (MAP_LEVELS, SED_GRAD,
+        SED_LON, SED_LAT, H_FOOT, colours, FL_EVERY) are those of the notebook cells. Needs the
+        SAMI drive, steps 1 and 2 (it reads manifest.json) and contourpy. Rerun it after step 2.
+        Events without overlays show the two boxes greyed out.
+
+Step 4. Open the website. Browsers do not let a page opened as a file read the data files,
         so serve the web/ folder with python's built-in web server:
             cd /Users/yulupeng/Documents/AAA_research/Code/Arase_SAMI_website/web
             python3 -m http.server 8000
@@ -132,6 +158,8 @@ Controls
   Ne vs L panel                 drag = zoom, double-click = reset; hover a line for its UT
   mouse in the 3D view          drag = rotate, scroll = zoom, right-drag = pan
   click a legend item           hide / show that layer (stays hidden while time changes)
+  add contour mapping / add SED edge (boxes above the 3D view)
+                                load and draw that overlay (see above); untick to hide it again
   camera icon (top right)       save the current view as a PNG
   home icon (top right)         back to the initial view
 Frames are loaded only when needed (the next 6 are loaded ahead while playing), so the
@@ -140,13 +168,13 @@ page opens quickly even though all frames together are ~270 MB.
 
 Sharing
 -------
-Copy the whole web/ folder (with data/) to another computer and run step 3 there, or put
+Copy the whole web/ folder (with data/) to another computer and run step 4 there, or put
 web/ on any static web host (GitHub Pages, a university web space): no server code is needed.
 
 GitHub Pages: this folder is the git repository github.com/PengYululu/SAMI_Arase_website.
 Pages serves the main branch root; index.html there forwards to web/, so the site is
     https://pengyululu.github.io/SAMI_Arase_website/
-To update it after re-running step 1 / step 2 or editing the page:
+To update it after re-running step 1 / 2 / 3 or editing the page:
     git add -A && git commit -m "update" && git push
 The site refreshes about a minute after the push. .nojekyll tells Pages to serve the files as is.
 
@@ -162,5 +190,5 @@ Notes
     surface traces: surfaces took ~1.3 s per frame to redraw, mesh3d ~0.1 s. Hovering on the
     plane shows log10(Ne).
   - If a TEC map is missing, that frame's Earth is drawn white (dayside) / black (nightside).
-  - After changing config.py, re-run step 1 and step 2, then reload the page (if the browser
+  - After changing config.py, re-run step 1 and step 2 (and step 3), then reload the page (if the browser
     shows old data, force-reload: Cmd-Shift-R).
