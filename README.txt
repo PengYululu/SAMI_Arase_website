@@ -42,6 +42,17 @@ Each time step shows (same as the "SAMI-Arase 3D" cell of sami_arase_plasmaspher
                            (notebook: sami_sed_edge, add_sed_edge, add_edge_pla)
     ?contour=1 and ?sed=1 in the address open the page with the box ticked (the address updates
     when you click, so the link can be shared).
+  - right panel, switch at its top right: "Arase leg" (the Ne vs L panel above) or "2D mapping":
+      top    : equatorial plane log10 Ne seen from the north (noon up, dawn right, a disc out to 8.6 Re, light white L-shell circles L = 2 - 8,
+               Earth white day / black night), the 50 / 500 / 1000 /cc contours, and each SED edge
+               point at the apex of its field line (triangles: north pink, south green)
+      bottom : SAMI TEC map (MLON x MLAT, jet 0 - 120 TECU) with white coastlines, the footprints of
+               the 50 / 500 / 1000 /cc contours, the SED edge points (same triangles) and the SED
+               search region (dashed)
+    (same as the 2D cell of the notebook, with the polar view on top). The plane and TEC map come from
+    the frame files; contours, footprints and SED from the step-3 overlay files, which this panel
+    loads whether or not the 3D boxes are ticked. Events without step 3 show the plane and TEC only.
+    ?panel=map in the address opens the page on the 2D mapping.
 Frame: +X = noon (Sun), +Y = dusk, Z up. Initial view: Sun on the left, dusk on the right.
 Time: the title shows the real (Arase) UT. SAMI file at real time T is the one at T + SHIFT
 steps (2024: SHIFT = 3, 6-min outputs -> +18 min; 2023: SHIFT = 0), as in the notebook.
@@ -160,6 +171,8 @@ Controls
   click a legend item           hide / show that layer (stays hidden while time changes)
   add contour mapping / add SED edge (boxes above the 3D view)
                                 load and draw that overlay (see above); untick to hide it again
+  Arase leg / 2D mapping (top right of the right panel)
+                                choose what the right panel shows; drag = zoom, double-click = reset
   camera icon (top right)       save the current view as a PNG
   home icon (top right)         back to the initial view
 Frames are loaded only when needed (the next 6 are loaded ahead while playing), so the

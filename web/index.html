@@ -20,8 +20,15 @@
   #ovbar label.off { color: var(--muted); cursor: not-allowed; }
   #ovbar input { accent-color: var(--accent); margin: 0; }
   #ovnote { color: var(--muted); }
-  #plotleg { border-left: 1px solid var(--line); }
-  @media (max-width: 900px) { #main { grid-template-columns: 1fr; height: auto; } #left #plot3d, #plotleg { height: 70vh; flex: none; } #left { height: auto; } #plotleg { border-left: 0; border-top: 1px solid var(--line); } }
+  #right { display: flex; flex-direction: column; min-width: 0; height: 100%; border-left: 1px solid var(--line); }
+  #right #plotleg { flex: 1 1 auto; min-height: 0; height: auto; }
+  #panelbar { display: flex; justify-content: flex-end; padding: 6px 12px 0; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { font: inherit; font-size: 13px; padding: 3px 12px; border: 0; background: #fff; color: var(--fg); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  @media (max-width: 900px) { #main { grid-template-columns: 1fr; height: auto; } #left #plot3d, #right #plotleg { height: 70vh; flex: none; } #left, #right { height: auto; } #right { border-left: 0; border-top: 1px solid var(--line); } }
   #controls { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel); }
   #controls button { font: inherit; padding: 4px 10px; border: 1px solid var(--line); background: #fff; border-radius: 6px; cursor: pointer; min-width: 36px; }
   #controls button:hover { border-color: var(--accent); }
@@ -75,7 +82,15 @@
     </div>
     <div id="plot3d"></div>
   </div>
-  <div id="plotleg"></div>
+  <div id="right">
+    <div id="panelbar">
+      <div class="seg" role="group" aria-label="right panel">
+        <button id="pnLeg" aria-pressed="true" title="SAMI3 vs Arase L3 Ne along the current inbound / outbound leg">Arase leg</button>
+        <button id="pnMap" aria-pressed="false" title="Equatorial plasmasphere (polar, top) and SAMI TEC map (bottom) with the contour mapping and SED edges">2D mapping</button>
+      </div>
+    </div>
+    <div id="plotleg"></div>
+  </div>
 </div>
 <div id="controls">
   <button id="prev" title="previous step (←)">◀</button>

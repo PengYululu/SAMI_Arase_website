@@ -18,7 +18,7 @@ const PREFETCH = 6;            // frames loaded ahead while playing
 const S = { base: 'data/', events: null, st: null, arase: null, sami: null, leg: -1, man: null, i: 0, target: 0, playing: false, fps: 4, cache: new Map(),
             pending: null, busy: false, t0ms: 0,
             ov: null, show: { contour: false, sed: false }, ovHave: { contour: new Set(), sed: new Set() },
-            ovCache: { contour: new Map(), sed: new Map() } };
+            ovCache: { contour: new Map(), sed: new Map() }, panel: 'leg' };
 const OV_KINDS = ['contour', 'sed'];
 const $ = id => document.getElementById(id);
 
@@ -60,7 +60,7 @@ function getFrame(i) {
 
 // overlay of one kind for frame i: null if the box is off or the frame has no file (fetched only when needed)
 function getOverlay(kind, i) {
-  if (!S.show[kind] || !S.ovHave[kind].has(i)) return Promise.resolve(null);
+  if (!ovNeeded(kind) || !S.ovHave[kind].has(i)) return Promise.resolve(null);
   const C = S.ovCache[kind];
   if (C.has(i)) { const p = C.get(i); C.delete(i); C.set(i, p); return p; }
   const f = S.man.frames[i];
@@ -74,7 +74,8 @@ async function getOverlays(i) {
   const [contour, sed] = await Promise.all(OV_KINDS.map(k => getOverlay(k, i)));
   return { contour, sed };
 }
-const isCached = i => S.cache.has(i) && OV_KINDS.every(k => !S.show[k] || !S.ovHave[k].has(i) || S.ovCache[k].has(i));
+const ovNeeded = kind => S.show[kind] || S.panel === 'map';      // 3D box ticked, or the 2D mapping panel is shown
+const isCached = i => S.cache.has(i) && OV_KINDS.every(k => !ovNeeded(k) || !S.ovHave[k].has(i) || S.ovCache[k].has(i));
 function prefetch(i) { getFrame(i); OV_KINDS.forEach(k => getOverlay(k, i)); }
 
 // ---------- time helpers ----------
@@ -168,7 +169,7 @@ function traces(i, fr, ov) {
            colorbar: { title: { text: 'Ne (/cm<sup>3</sup>)' }, tickvals: ticks, ticktext: ticks.map(t => '10<sup>' + t + '</sup>'), len: 0.6 },
            hovertemplate: 'log10 Ne = %{intensity:.2f} (/cc)<extra>equator</extra>' });
 
-  if (ov) T.push(...overlayTraces(ov));
+  if (ov) T.push(...overlayTraces({ contour: S.show.contour ? ov.contour : null, sed: S.show.sed ? ov.sed : null }));
 
   // Arase orbit +/- track_hr and the Arase dot coloured by L3 Ne on the plane's colour scale
   const k = araseIndex(f.h);
@@ -201,7 +202,7 @@ function overlayTraces(ov) {
   const T = [], ms = (S.ov && S.ov.settings) || {}, zip3 = (a, b, c) => a.map((v, q) => [v, b[q], c[q]]);
   if (ov.contour) ov.contour.levels.forEach(d => {
     const grp = 'pm' + d.level;
-    T.push({ type: 'scatter3d', uid: 'pm_line_' + d.level, name: d.level + ' /cc contour + footprints', mode: 'lines',
+    T.push({ type: 'scatter3d', uid: 'pm_line_' + d.level, name: d.level + ' /cc + footpoints', mode: 'lines',
              x: d.x, y: d.y, z: d.x.map(v => v === null ? null : 0.02), line: { color: d.color, width: 5 },
              connectgaps: false, legendgroup: grp, hoverinfo: 'skip' });
     T.push({ type: 'scatter3d', uid: 'pm_foot_' + d.level, name: d.level + ' /cc footprints', mode: 'markers',
@@ -211,19 +212,20 @@ function overlayTraces(ov) {
                             d.level + ' /cc</extra>' });
   });
   if (ov.sed) ov.sed.hemis.forEach(d => {
+    const H = d.hemi === 'north' ? 'N' : 'S';
     const grp = 'sed_' + d.hemi, em = ms.edge_marker || 4;
-    T.push({ type: 'scatter3d', uid: 'sed_edge_' + d.hemi, name: 'SED edge (' + d.hemi + ')', mode: 'markers',
+    T.push({ type: 'scatter3d', uid: 'sed_edge_' + d.hemi, name: 'SED edge (' + H + ')', mode: 'markers',
              x: d.ex, y: d.ey, z: d.ez, marker: { size: em, color: d.color, line: { color: 'black', width: 1 } },
              customdata: zip3(d.emlon, d.emlat, d.egrad), legendgroup: grp,
              hovertemplate: 'MLON %{customdata[0]:.1f}, MLAT %{customdata[1]:.1f}<br>|∇TEC| = %{customdata[2]:.3f} TECU/km' +
-                            '<extra>SED edge ' + d.hemi + '</extra>' });
-    T.push({ type: 'scatter3d', uid: 'sed_apex_' + d.hemi, name: 'edge -> equatorial plane (' + d.hemi + ')', mode: 'markers',
+                            '<extra>SED edge (' + H + ')</extra>' });
+    T.push({ type: 'scatter3d', uid: 'sed_apex_' + d.hemi, name: 'edge-plasmasphere (' + H + ')', mode: 'markers',
              x: d.ax, y: d.ay, z: d.ax.map(() => 0.03),
              marker: { size: em + 1, color: d.color, symbol: 'diamond', line: { color: 'black', width: 1 } },
              customdata: d.ar.map((v, q) => [v, d.amlon[q], d.emlon[q], d.emlat[q], d.dist[q]]), legendgroup: grp,
              hovertemplate: 'apex r = %{customdata[0]:.2f} Re, MLON %{customdata[1]:.1f}<br>from edge MLON %{customdata[2]:.1f}, ' +
-                            'MLAT %{customdata[3]:.1f}<br>foot %{customdata[4]:.0f} km from edge<extra>edge -> plasmasphere ' + d.hemi + '</extra>' });
-    if (d.lx.length) T.push({ type: 'scatter3d', uid: 'sed_fl_' + d.hemi, name: 'edge field lines (' + d.hemi + ')', mode: 'lines',
+                            'MLAT %{customdata[3]:.1f}<br>foot %{customdata[4]:.0f} km from edge<extra>edge-plasmasphere (' + H + ')</extra>' });
+    if (d.lx.length) T.push({ type: 'scatter3d', uid: 'sed_fl_' + d.hemi, name: 'edge field lines (' + H + ')', mode: 'lines',
              x: d.lx, y: d.ly, z: d.lz, line: { color: d.color, width: 2 }, opacity: 0.6, connectgaps: false,
              legendgroup: grp, showlegend: false, hoverinfo: 'skip' });
   });
@@ -333,6 +335,130 @@ function drawLeg(k) {
   Plotly.restyle('plotleg', { x: [ds.x, da.x], y: [ds.y, da.y] }, [n - 2, n - 1]);
 }
 
+// ---------- 2D mapping panel: equatorial plasmasphere (polar, top) + SAMI TEC map (bottom) ----------
+// Same as the 2D cell of the notebook: top = equatorial plane log10 Ne seen from the north, noon up, dawn right,
+// with the 50 / 500 / 1000 /cc contours and the SED edge points mapped to their field-line apex (triangles);
+// bottom = TEC map (MLON x MLAT) with white coastlines, the contour footprints and the SED edge points (triangles).
+// The plane comes from the frame file (resampled here onto an x-y grid), contours / footprints / SED from the overlays.
+const MAP_R = 8, MAP_N = 321;                                // outermost L circle (Re) and pixels across the image
+const IMG_R = MAP_R + 0.6;                                   // the plane is drawn as a disc of this radius (Re)
+const L_RINGS = [2, 3, 4, 5, 6, 7, 8];                        // light white L-shell circles (equatorial r = L Re)
+function planeImage(fr, ut) {
+  const st = S.st, r = st.r_plane, nr = r.length, nc = st.lon.length, lon0 = st.lon[0], dl = st.lon[1] - st.lon[0];
+  const ax = [], z = [];
+  for (let q = 0; q < MAP_N; q++) ax.push(-IMG_R + 2 * IMG_R * q / (MAP_N - 1));
+  for (let a = 0; a < MAP_N; a++) {                           // screen row a: Y_screen = X_3D (noon up)
+    const row = new Array(MAP_N);
+    for (let b = 0; b < MAP_N; b++) {                         // screen column b: X_screen = -Y_3D (dawn right)
+      const X = ax[a], Y = -ax[b], rr = Math.hypot(X, Y);
+      if (rr < r[0] || rr > r[nr - 1] || rr > IMG_R) { row[b] = null; continue; }   // round disc, not a square
+      let lo = 0, hi = nr - 1;                                // r_plane is increasing: bisection
+      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (r[m] <= rr) lo = m; else hi = m; }
+      const wr = (rr - r[lo]) / (r[hi] - r[lo]);
+      const lon = Math.atan2(Y, X) / DEG + st.mlon_offset - 15 * ut + 180;          // inverse of phi in traces()
+      const fb = (((lon - lon0) % 360) + 360) % 360 / dl, b0 = Math.min(Math.floor(fb), nc - 2), wb = fb - b0;
+      const g = (ia, ib) => fr.plane[ia * nc + ib];
+      const v = (1 - wr) * ((1 - wb) * g(lo, b0) + wb * g(lo, b0 + 1)) + wr * ((1 - wb) * g(hi, b0) + wb * g(hi, b0 + 1));
+      row[b] = isFinite(v) ? v : null;
+    }
+    z.push(row);
+  }
+  return { ax, z };
+}
+
+function drawMap(i, fr, ov) {
+  S.leg = -2;                                                 // the leg panel is redrawn when it comes back
+  const st = S.st, set = st.settings, f = S.man.frames[i], O = S.ov || {};
+  const scr = (x, y) => [y.map(v => v === null ? null : -v), x];                    // 3D (x noon, y dusk) -> screen
+  const T = [], img = planeImage(fr, f.ut);
+  const ticks = []; for (let t = set.eq_range[0]; t <= set.eq_range[1]; t++) ticks.push(t);   // same scale as the 3D plane
+  T.push({ type: 'heatmap', x: img.ax, y: img.ax, z: img.z, xaxis: 'x', yaxis: 'y', colorscale: 'Jet',
+           zmin: set.eq_range[0], zmax: set.eq_range[1], hoverongaps: false, showlegend: false,
+           colorbar: { title: { text: 'Ne (/cm<sup>3</sup>)', side: 'right' }, tickvals: ticks, ticktext: ticks.map(t => '10<sup>' + t + '</sup>'),
+                       y: 0.56, yanchor: 'bottom', len: 0.4, thickness: 12, x: 1.0 },
+           hovertemplate: 'log10 Ne = %{z:.2f}<extra>equatorial plane</extra>' });
+  // contours on the plane (top) and their footprints on the TEC map (bottom), one legend entry per level
+  if (ov && ov.contour) ov.contour.levels.forEach(d => {
+    const [xs, ys] = scr(d.x, d.y), grp = 'm' + d.level;
+    T.push({ type: 'scatter', mode: 'lines', x: xs, y: ys, xaxis: 'x', yaxis: 'y', name: d.level + ' /cc',
+             line: { color: d.color, width: 2.5 }, connectgaps: false, legendgroup: grp, hoverinfo: 'skip' });
+    T.push({ type: 'scatter', mode: 'markers', x: d.fmlon, y: d.fmlat, xaxis: 'x2', yaxis: 'y2', name: d.level + ' /cc footprints',
+             marker: { size: 3, color: d.color }, legendgroup: grp, showlegend: false, customdata: d.fr,
+             hovertemplate: 'MLON %{x:.1f}, MLAT %{y:.1f}<br>apex r = %{customdata:.2f} Re<extra>' + d.level + ' /cc</extra>' });
+  });
+  // SED edge points (bottom) and the apex of their field line on the plane (top): triangles
+  if (ov && ov.sed) ov.sed.hemis.forEach(d => {
+    const H = d.hemi === 'north' ? 'N' : 'S';
+    const [xs, ys] = scr(d.ax, d.ay), grp = 's' + d.hemi;
+    const mk = { symbol: 'triangle-up', size: 10, color: d.color, line: { color: 'black', width: 1 } };
+    T.push({ type: 'scatter', mode: 'markers', x: xs, y: ys, xaxis: 'x', yaxis: 'y', name: 'SED (' + H + ')',
+             marker: mk, legendgroup: grp, customdata: d.ar.map((v, q) => [v, d.amlon[q], d.emlon[q], d.emlat[q]]),
+             hovertemplate: 'apex r = %{customdata[0]:.2f} Re, MLON %{customdata[1]:.1f}<br>from edge MLON %{customdata[2]:.1f}, MLAT %{customdata[3]:.1f}' +
+                            '<extra>SED apex (' + H + ')</extra>' });
+    T.push({ type: 'scatter', mode: 'markers', x: d.emlon, y: d.emlat, xaxis: 'x2', yaxis: 'y2', name: 'SED edge (' + H + ')',
+             marker: mk, legendgroup: grp, showlegend: false, customdata: d.egrad,
+             hovertemplate: 'MLON %{x:.1f}, MLAT %{y:.1f}<br>|∇TEC| = %{customdata:.3f} TECU/km<extra>SED edge (' + H + ')</extra>' });
+  });
+  // TEC map (bottom) + white coastlines (no line across 0/360 deg)
+  if (f.tec) {
+    const nr = st.lat_earth.length, nc = st.lon_tec.length, z = [];
+    for (let a = 0; a < nr; a++) { const row = []; for (let b = 0; b < nc; b++) { const v = fr.tec[a * nc + b]; row.push(isFinite(v) ? v : null); } z.push(row); }
+    T.unshift({ type: 'heatmap', x: st.lon_tec, y: st.lat_earth, z, xaxis: 'x2', yaxis: 'y2', colorscale: 'Jet', showlegend: false,
+                zmin: set.tec_range[0], zmax: set.tec_range[1], zsmooth: 'best',
+                colorbar: { title: { text: 'TEC (TECU)', side: 'right' }, y: 0, yanchor: 'bottom', len: 0.38, thickness: 12, x: 1.0 },
+                hovertemplate: 'MLON %{x:.0f}, MLAT %{y:.0f}<br>TEC = %{z:.1f} TECU<extra></extra>' });
+  }
+  const cx = [], cy = [];
+  st.coast_mlon.forEach((lo, q) => {
+    const la = st.coast_mlat[q], prev = cx.length ? cx[cx.length - 1] : null;
+    if (lo !== null && prev !== null && Math.abs(lo - prev) > 180) { cx.push(null); cy.push(null); }
+    cx.push(lo); cy.push(la);
+  });
+  T.push({ type: 'scatter', mode: 'lines', x: cx, y: cy, xaxis: 'x2', yaxis: 'y2', line: { color: 'white', width: 1 },
+           connectgaps: false, hoverinfo: 'skip', showlegend: false });
+
+  // polar decorations: Earth (day white, night black), rings every 2 Re, MLT labels
+  const circ = (r, opt) => ({ type: 'circle', xref: 'x', yref: 'y', x0: -r, x1: r, y0: -r, y1: r, ...opt });
+  let night = 'M -1 0';
+  for (let q = 0; q <= 36; q++) { const a = Math.PI + Math.PI * q / 36; night += ' L ' + Math.cos(a).toFixed(4) + ' ' + Math.sin(a).toFixed(4); }
+  const shapes = L_RINGS.map(r => circ(r, { line: { color: 'rgba(255,255,255,0.55)', width: 1 }, layer: 'above' }))
+    .concat([circ(1, { fillcolor: 'white', line: { color: 'black', width: 1 }, layer: 'above' }),
+             { type: 'path', xref: 'x', yref: 'y', path: night + ' Z', fillcolor: 'black', line: { width: 0 }, layer: 'above' }]);
+  if (O.sed) {                                               // SED search region on the TEC map
+    const [l0, l1] = O.sed.lon, [b0, b1] = O.sed.lat;
+    [[b0, b1], [-b1, -b0]].forEach(([y0, y1]) => shapes.push({ type: 'rect', xref: 'x2', yref: 'y2', x0: l0, x1: l1, y0, y1,
+      line: { color: 'white', width: 1, dash: 'dash' } }));
+  }
+  const lab = (x, y, t) => ({ xref: 'x', yref: 'y', x, y, text: t, showarrow: false, font: { size: 11 } });
+  const R = IMG_R + 0.45;                                     // MLT labels just outside the disc
+  const ann = [lab(0, R, '12 MLT'), lab(0, -R, '00'), lab(R, 0, '06'), lab(-R, 0, '18')]
+    .concat(L_RINGS.map(L => ({ xref: 'x', yref: 'y', x: L * Math.SQRT1_2, y: -L * Math.SQRT1_2, text: 'L=' + L, showarrow: false,
+                                xanchor: 'left', yanchor: 'top', font: { size: 9, color: 'rgba(255,255,255,0.85)' } })));   // labels toward dawn-midnight
+  if (!(ov && (ov.contour || ov.sed)))
+    ann.push({ xref: 'paper', yref: 'paper', x: 0.6, y: 0.43, showarrow: false, font: { size: 12, color: '#b45309' },
+               text: S.ov ? 'no contour / SED file for this step' : 'contour mapping and SED edge not built for this event' });
+  Plotly.react('plotleg', T, {
+    uirevision: 'map', hovermode: 'closest', margin: { l: 50, r: 70, t: 32, b: 42 },
+    title: { text: '2D mapping  ' + fmt(hToDate(f.h)) + ' UT', font: { size: 14 } },
+    xaxis:  { domain: [0.16, 0.88], range: [-R - 0.5, R + 0.5], constrain: 'domain', showgrid: false, zeroline: false, showticklabels: false, anchor: 'y' },
+    yaxis:  { domain: [0.46, 1], range: [-R - 0.5, R + 0.5], scaleanchor: 'x', constrain: 'domain', showgrid: false, zeroline: false, showticklabels: false },
+    xaxis2: { domain: [0, 0.88], range: [0, 360], dtick: 60, title: { text: 'MLON' }, anchor: 'y2', showgrid: false },
+    yaxis2: { domain: [0, 0.38], range: [-90, 90], dtick: 30, title: { text: 'MLAT' }, anchor: 'x2', showgrid: false },
+    shapes, annotations: ann,
+    legend: { x: 0, xanchor: 'left', y: 1, yanchor: 'top', bgcolor: 'rgba(255,255,255,0.8)', font: { size: 10 } },
+  }, { responsive: true, displaylogo: false });
+}
+
+function setPanel(p, redraw) {
+  S.panel = p;
+  $('pnLeg').setAttribute('aria-pressed', p === 'leg'); $('pnMap').setAttribute('aria-pressed', p === 'map');
+  const u = new URL(location.href);                           // ?panel=map opens with the 2D mapping
+  p === 'map' ? u.searchParams.set('panel', 'map') : u.searchParams.delete('panel');
+  history.replaceState(null, '', u);
+  if (p === 'leg') { S.leg = -2; Plotly.purge('plotleg'); }   // start the leg figure clean
+  if (redraw && !S.playing) request(S.target);
+}
+
 // ---------- drawing / navigation ----------
 function labels(i) {
   const f = S.man.frames[i], k = araseIndex(f.h), a = S.arase;
@@ -348,7 +474,7 @@ async function draw(i, fr, ov) {
   ovNote(i, ov);
   await Plotly.react('plot3d', traces(i, fr, ov), layout3d(i), { responsive: true, displaylogo: false });
   Plotly.relayout('plot2d', { shapes: S.tlShapes.concat([cursorShape(i)]) });
-  drawLeg(araseIndex(S.man.frames[i].h));
+  if (S.panel === 'map') drawMap(i, fr, ov); else drawLeg(araseIndex(S.man.frames[i].h));
   S.i = i;
 }
 
@@ -474,6 +600,10 @@ async function main() {
     else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
   });
+
+  $('pnLeg').addEventListener('click', e => { e.currentTarget.blur(); setPanel('leg', true); });
+  $('pnMap').addEventListener('click', e => { e.currentTarget.blur(); setPanel('map', true); });
+  setPanel(new URLSearchParams(location.search).get('panel') === 'map' ? 'map' : 'leg', false);
 
   drawTimeline();
   request(0);
